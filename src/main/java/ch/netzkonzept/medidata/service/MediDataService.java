@@ -13,19 +13,14 @@ package ch.netzkonzept.medidata.service;
 
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.KeyManagementException;
-import java.security.KeyStoreException;
-import java.security.NoSuchAlgorithmException;
 import java.util.List;
 
 import javax.xml.parsers.DocumentBuilder;
@@ -38,7 +33,6 @@ import javax.xml.xpath.XPathFactory;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.builder.fluent.Configurations;
-import org.apache.commons.configuration2.ex.ConfigurationException;
 import org.apache.commons.io.FilenameUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,13 +64,12 @@ public class MediDataService {
 
 	private static Logger LOGGER = LoggerFactory.getLogger(MediDataService.class);
 
-	public MediDataService(File configFile) throws ConfigurationException, KeyManagementException,
-			NoSuchAlgorithmException, KeyStoreException, FileNotFoundException, UnsupportedEncodingException {
+	public MediDataService(File configFile) throws IOException, Exception {
 
 		config = new Configurations().properties(configFile);
 
 		box = new MediDataBoxFacade(config.getString("MedidataHost"), config.getString("AuthToken"),
-				config.getString("XClientID"));
+				config.getString("XClientID"), config.getString("CertFile"), config.getString("CertKey"));
 
 		checkGLN = config.getBoolean("CheckGLN");
 

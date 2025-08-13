@@ -12,11 +12,16 @@
 package ch.netzkonzept.medidata.service;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyManagementException;
+import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
+
 import javax.net.ssl.SSLContext;
 
 import org.apache.hc.client5.http.entity.mime.MultipartEntityBuilder;
@@ -53,8 +58,8 @@ public class MediDataBoxFacade {
 
 	private static Logger LOGGER = LoggerFactory.getLogger(MediDataService.class);
 
-	public MediDataBoxFacade(String host, String token, String clientID)
-			throws KeyManagementException, NoSuchAlgorithmException, KeyStoreException {
+	public MediDataBoxFacade(String host, String token, String clientID, String certFile, String certKey)
+			throws KeyManagementException, NoSuchAlgorithmException, KeyStoreException, Exception, FileNotFoundException, IOException {
 
 		this.host = host;
 		this.token = token;
@@ -62,12 +67,24 @@ public class MediDataBoxFacade {
 
 		gson = new GsonBuilder().setPrettyPrinting().create();
 
-		final SSLContext sslcontext = SSLContexts.custom().loadTrustMaterial(null, new TrustAllStrategy()).build();
+		/*final SSLContext sslcontext = SSLContexts.custom().loadTrustMaterial(null, new TrustAllStrategy()).build();
 		final SSLConnectionSocketFactory sslSocketFactory = SSLConnectionSocketFactoryBuilder.create()
 				.setSslContext(sslcontext).setHostnameVerifier(new NoopHostnameVerifier()).build();
 		final HttpClientConnectionManager cm = PoolingHttpClientConnectionManagerBuilder.create()
 				.setSSLSocketFactory(sslSocketFactory).setMaxConnTotal(400).setMaxConnPerRoute(200)
-				.setConnectionTimeToLive(TimeValue.ofSeconds(3)).build();
+				.setConnectionTimeToLive(TimeValue.ofSeconds(3)).build();*/
+		
+		KeyStore keyStore = KeyStore.getInstance("PKCS12");
+		keyStore.load(new FileInputStream(certFile), certKey.toCharArray());
+		SSLContext sslcontext = SSLContexts.custom()
+		        .loadKeyMaterial(keyStore, certKey.toCharArray())
+		        .build();
+		final SSLConnectionSocketFactory sslSocketFactory = SSLConnectionSocketFactoryBuilder.create()
+				.setSslContext(sslcontext).setHostnameVerifier(new NoopHostnameVerifier()).build();
+		final HttpClientConnectionManager cm = PoolingHttpClientConnectionManagerBuilder.create()
+				.setSSLSocketFactory(sslSocketFactory).setMaxConnTotal(400).setMaxConnPerRoute(200)
+				.setConnectionTimeToLive(TimeValue.ofSeconds(3)).build();		
+
 		client = HttpClients.custom().setConnectionManager(cm).evictExpiredConnections().build();
 	}
 
@@ -84,9 +101,12 @@ public class MediDataBoxFacade {
 			builder.addBinaryBody("elauploadinfo", controlFile, ContentType.APPLICATION_JSON, controlFile.getName());
 		}
 
-		String result = Request.post("https://" + host + "/md/ela/uploads")
-				.addHeader("Content-type", "multipart/form-data").addHeader("X-CLIENT-ID", clientID)
-				.addHeader("Authorization", "Basic " + token).body(builder.build()).execute(client).returnContent()
+		String result = Request.post("https://" + host + "/ela/uploads")
+				.addHeader("X-CLIENT-ID", clientID)
+				.addHeader("Authorization", "Basic " + token)
+				.body(builder.build())
+				.execute(client)
+				.returnContent()
 				.asString();
 
 		TransmissionLogEntry transLog = gson.fromJson(result, TransmissionLogEntry.class);
@@ -96,7 +116,7 @@ public class MediDataBoxFacade {
 
 	public TransmissionLogEntry getStatus(String transmissionReference) throws IOException {
 		LOGGER.info("Get transmission status for reference " + transmissionReference);
-		String result = Request.get("https://" + host + "/md/ela/uploads/" + transmissionReference + "/status")
+		String result = Request.get("https://" + host + "/ela/uploads/" + transmissionReference + "/status")
 				.addHeader("X-CLIENT-ID", clientID).addHeader("Authorization", "Basic " + token).execute(client)
 				.returnContent().asString(StandardCharsets.UTF_8);
 
@@ -107,7 +127,7 @@ public class MediDataBoxFacade {
 
 	public DocumentListEntry[] getDocumentsList() throws IOException {
 		LOGGER.info("Get documents list");
-		String result = Request.get("https://" + host + "/md/ela/downloads?limit=1000")
+		String result = Request.get("https://" + host + "/ela/downloads?limit=1000")
 				.addHeader("X-CLIENT-ID", clientID).addHeader("Authorization", "Basic " + token).execute(client)
 				.returnContent().asString(StandardCharsets.UTF_8);
 
@@ -117,7 +137,7 @@ public class MediDataBoxFacade {
 
 	public DocumentListEntry getDocument(DocumentListEntry doc) throws IOException {
 		LOGGER.info("Get document " + doc.getTransmissionReference());
-		String result = Request.get("https://" + host + "/md/ela/downloads/" + doc.getTransmissionReference())
+		String result = Request.get("https://" + host + "/ela/downloads/" + doc.getTransmissionReference())
 				.addHeader("X-CLIENT-ID", clientID).addHeader("Authorization", "Basic " + token)
 				.addHeader("Accept", "application/octet-stream").execute(client).returnContent()
 				.asString(StandardCharsets.UTF_8);
@@ -127,14 +147,14 @@ public class MediDataBoxFacade {
 
 	public void confirmDocument(DocumentListEntry doc) throws IOException {
 		LOGGER.info("Confirming document " + doc.getTransmissionReference());
-		Request.put("https://" + host + "/md/ela/downloads/" + doc.getTransmissionReference() + "/status")
+		Request.put("https://" + host + "/ela/downloads/" + doc.getTransmissionReference() + "/status")
 				.addHeader("X-CLIENT-ID", clientID).addHeader("Authorization", "Basic " + token)
 				.bodyString("{\"status\": \"CONFIRMED\"}", ContentType.APPLICATION_JSON).execute(client);
 	}
 
 	public MessageLogEntry[] getMessages() throws IOException {
 		LOGGER.info("Get messages");
-		String result = Request.get("https://" + host + "/md/ela/notifications?limit=1000")
+		String result = Request.get("https://" + host + "/ela/notifications?limit=1000")
 				.addHeader("X-CLIENT-ID", clientID).addHeader("Authorization", "Basic " + token).execute(client)
 				.returnContent().asString(StandardCharsets.UTF_8);
 
@@ -143,7 +163,7 @@ public class MediDataBoxFacade {
 		for (MessageLogEntry msg : msgLog) {
 			if (!msg.isRead()) {
 				LOGGER.info("Confirming new unread message " + msg.getId());
-				result = Request.put("https://" + host + "/md/ela/notifications/" + msg.getId() + "/status")
+				result = Request.put("https://" + host + "/ela/notifications/" + msg.getId() + "/status")
 						.addHeader("X-CLIENT-ID", clientID).addHeader("Authorization", "Basic " + token)
 						.bodyString("{\"notificationFetched\": true}", ContentType.APPLICATION_JSON).execute(client)
 						.returnContent().asString();
@@ -156,8 +176,10 @@ public class MediDataBoxFacade {
 
 	public Participant[] getParticipants() throws IOException {
 
-		String result = Request.get("https://" + host + "/md/ela/participants?limit=1000")
-				.addHeader("X-CLIENT-ID", clientID).addHeader("Authorization", "Basic " + token).execute(client)
+		String result = Request.get("https://" + host + "/ela/participants?limit=1000")
+				.addHeader("X-CLIENT-ID", clientID)
+				.addHeader("Authorization", "Basic " + token)
+				.execute(client)
 				.returnContent().asString(StandardCharsets.UTF_8);
 
 		Participant[] participantDir = gson.fromJson(result, Participant[].class);
